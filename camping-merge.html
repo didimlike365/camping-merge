@@ -1,3 +1,20 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#bfe6f8">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="캠핑 머지">
+<style>
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);box-sizing:border-box;height:100%}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;font-size:14px}
+img{max-width:100%}
+[hidden]{display:none!important}
+</style>
 <title>캠핑 머지</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -39,7 +56,7 @@ body{
   padding-right:max(16px,env(safe-area-inset-right,0px));
   max-width:560px;margin:0 auto;box-sizing:border-box;
 }
-.hud{display:flex;align-items:center;gap:12px}
+.hud{display:flex;align-items:center;gap:8px}
 .scorebox{
   display:flex;align-items:center;gap:12px;padding:6px 14px 6px 12px;border-radius:16px;
   background:var(--cream);border:2px solid var(--cream-edge);box-shadow:0 3px 0 var(--cream-shadow);
@@ -89,6 +106,7 @@ canvas{display:block;touch-action:none}
 .overlay p{margin:0;color:rgba(246,240,228,.9);font-size:15px;line-height:1.6;max-width:26ch}
 .final{font-family:var(--f-display);font-size:58px;color:var(--snow);line-height:1;font-variant-numeric:tabular-nums}
 .badge{font-family:var(--f-display);font-size:15px;color:var(--night);background:var(--flame);border-radius:999px;padding:4px 12px}
+.ioshint{font-size:12px!important;color:var(--flame)!important}
 .bestitem{display:flex;align-items:center;gap:8px;color:var(--snow);font-family:var(--f-display);font-size:18px}
 .bestitem img{width:56px;height:56px}
 .btn{
@@ -168,7 +186,8 @@ canvas{display:block;touch-action:none}
   .parade img,.combo.go,.card-in,.tool.gain,.stat .val.bump{animation-duration:.01s}
 }
 </style>
-
+</head>
+<body>
 <div class="app">
   <header class="hud">
     <div class="scorebox">
@@ -179,6 +198,9 @@ canvas{display:block;touch-action:none}
     <div class="next"><span class="lbl">다음</span><div class="chip" id="next"></div></div>
     <button class="iconbtn" id="music" aria-label="배경음악 끄기">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>
+    </button>
+    <button class="iconbtn" id="fs" aria-label="전체화면" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path id="fsIn" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><path id="fsOut" d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" style="display:none"/></svg>
     </button>
     <button class="iconbtn" id="mute" aria-label="소리 끄기">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path id="spkOn" d="M16.5 9a4 4 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11"/><path id="spkOff" d="M16 9l5 6M21 9l-5 6" style="display:none"/></svg>
@@ -200,6 +222,7 @@ canvas{display:block;touch-action:none}
         <p>같은 캠핑 용품끼리 부딪히면 더 큰 물건이 돼요. 캠핑카 두 대를 합치면 캠핑장 완성!</p>
         <button class="btn" id="startBtn">캠핑 시작</button>
         <p style="font-size:13px">좌우로 움직여 위치를 정하고, 손을 떼면 떨어져요</p>
+        <p class="ioshint" id="iosHint" hidden>아이폰은 공유 버튼 → 홈 화면에 추가로 열면 전체화면이 돼요</p>
       </div>
       <div class="overlay" id="overOv" hidden>
         <h2>캠핑 끝!</h2>
@@ -577,6 +600,50 @@ musicBtn.addEventListener('click', () => {
   if (state !== 'start') music.start(); else music.apply();
 });
 renderMute(); renderMusic();
+
+// ---------- fullscreen ----------
+// Browsers only allow fullscreen from a tap, so the first tap on the page switches it on.
+// After the player picks normal mode, it stays normal until the page is opened again.
+const docEl = document.documentElement;
+const fsSupported = !!(docEl.requestFullscreen || docEl.webkitRequestFullscreen) && (document.fullscreenEnabled !== false || document.webkitFullscreenEnabled);
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+let fsWanted = true;
+const isFs = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+function enterFs(){
+  const req = docEl.requestFullscreen || docEl.webkitRequestFullscreen;
+  if (!req || isFs()) return;
+  try {
+    const pr = req.call(docEl, {navigationUI:'hide'});
+    if (pr && pr.then) pr.then(() => { try { screen.orientation.lock('portrait').catch(()=>{}); } catch(e){} }).catch(()=>{});
+  } catch(e){}
+}
+function exitFs(){
+  const ex = document.exitFullscreen || document.webkitExitFullscreen;
+  if (!ex || !isFs()) return;
+  try { const pr = ex.call(document); if (pr && pr.catch) pr.catch(()=>{}); } catch(e){}
+}
+function renderFs(){
+  const on = isFs();
+  $('fsIn').style.display = on ? 'none' : '';
+  $('fsOut').style.display = on ? '' : 'none';
+  $('fs').setAttribute('aria-label', on ? '기본모드로 돌아가기' : '전체화면');
+  $('fs').title = on ? '기본모드' : '전체화면';
+}
+if (fsSupported){
+  $('fs').hidden = false;
+  $('fs').addEventListener('click', e => {
+    e.stopPropagation();
+    if (isFs()){ fsWanted = false; exitFs(); } else { fsWanted = true; enterFs(); }
+  });
+  const autoFs = e => { if (fsWanted && !isFs() && !(e.target.closest && e.target.closest('#fs'))) enterFs(); };
+  document.addEventListener('pointerdown', autoFs, true);
+  document.addEventListener('fullscreenchange', renderFs);
+  document.addEventListener('webkitfullscreenchange', renderFs);
+  renderFs();
+} else if (isIOS && !isStandalone){
+  $('iosHint').hidden = false;
+}
 
 $('startBtn').addEventListener('click', e => { e.stopPropagation(); startGame(); });
 $('againBtn').addEventListener('click', e => { e.stopPropagation(); startGame(); });
@@ -1507,3 +1574,5 @@ buildChain(); renderChain(); renderNext(); renderTools();
 requestAnimationFrame(frame);
 })();
 </script>
+</body>
+</html>
