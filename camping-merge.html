@@ -199,7 +199,14 @@ canvas{display:block;touch-action:none}
 }
 .tool svg{width:24px;height:24px;flex:none}
 .tool:active:not(:disabled){transform:translateY(3px);box-shadow:0 1px 0 var(--cream-shadow)}
-.tool:disabled{opacity:.45;cursor:default}
+.tool:disabled{cursor:default}
+.tool:disabled > svg,.tool:disabled > span:not(.gauge){opacity:.4}
+.tool:disabled .cnt{opacity:.55}
+.tool > svg,.tool > span:not(.gauge){position:relative}
+/* score gauge: the button of the next reward fills from left to right */
+.gauge{position:absolute;inset:0;border-radius:12px;overflow:hidden;pointer-events:none}
+.gauge i{display:block;height:100%;width:0;background:linear-gradient(90deg,rgba(255,200,87,.55),rgba(255,138,61,.55));transition:width .45s ease}
+.tool.due .gauge{box-shadow:inset 0 0 0 2px rgba(255,138,61,.55)}
 .tool.on{background:#ffe1c2;border-color:var(--ember);box-shadow:0 4px 0 #d9783a}
 .tool .cnt{
   position:absolute;top:-8px;right:-6px;min-width:22px;height:22px;border-radius:11px;padding:0 5px;box-sizing:border-box;
@@ -246,15 +253,15 @@ canvas{display:block;touch-action:none}
   <div class="tools">
     <button class="tool" id="tShake" aria-label="흔들기">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="7.5" y="5" width="9" height="14" rx="2.5"/><path d="M3.5 8.5v7M20.5 8.5v7M1 10.5v3M23 10.5v3"/></svg>
-      <span>흔들기</span><b class="cnt" id="cShake">0</b>
+      <span class="gauge" aria-hidden="true"><i></i></span><span>흔들기</span><b class="cnt" id="cShake">0</b>
     </button>
     <button class="tool" id="tHammer" aria-label="망치">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3.5l7.5 7.5-3 3L10 6.5z"/><path d="M12 9.5L3.8 17.7a2 2 0 0 0 2.8 2.8L14.8 12.3"/></svg>
-      <span>망치</span><b class="cnt" id="cHammer">0</b>
+      <span class="gauge" aria-hidden="true"><i></i></span><span>망치</span><b class="cnt" id="cHammer">0</b>
     </button>
     <button class="tool" id="tSwap" aria-label="바꾸기">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h14l-3.5-3.5M20 16H6l3.5 3.5"/></svg>
-      <span>바꾸기</span><b class="cnt" id="cSwap">0</b>
+      <span class="gauge" aria-hidden="true"><i></i></span><span>바꾸기</span><b class="cnt" id="cSwap">0</b>
     </button>
   </div>
 
@@ -399,7 +406,8 @@ try { (JSON.parse(store.get('cm-dex')||'[]')||[]).forEach(v => dex.add(v)); } ca
 const saveDex = () => store.set('cm-dex', JSON.stringify([...dex]));
 
 const tools = {shake:0, hammer:0, swap:0};
-let nextReward = 0, rewards = 0, hammerMode = false;
+let nextReward = 0, prevReward = 0, rewards = 0, rewardKey = 'shake', hammerMode = false;
+const REWARD_ORDER = ['shake','hammer','swap'];
 
 function pool(){ return maxLvl >= 6 ? [0,0,1,1,2,2,3] : maxLvl >= 4 ? [0,0,1,1,2,2] : [0,0,0,1,1,2]; }
 function rollNext(){ const p = pool(); return p[Math.floor(Math.random()*p.length)]; }
@@ -453,18 +461,38 @@ function addScore(p){
   if (score > best){ best = score; $('best').textContent = best; }
   const el = $('score'); el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
   while (score >= nextReward){ giveReward(); }
+  renderGauge();
 }
 
+// next reward tool: take turns shake → hammer → swap, skipping any that are already full (5)
+function pickRewardKey(after){
+  let i = REWARD_ORDER.indexOf(after);
+  for (let n=0; n<3; n++){ i = (i + 1) % 3; if (tools[REWARD_ORDER[i]] < 5) return REWARD_ORDER[i]; }
+  return null;
+}
 function giveReward(){
   rewards++;
+  prevReward = nextReward;
   nextReward += 350 + rewards*250;
-  const keys = Object.keys(tools).filter(k => tools[k] < 5);
-  if (!keys.length) return;
-  const k = keys[Math.floor(Math.random()*keys.length)];
-  tools[k]++;
-  renderTools(k);
-  toast(({shake:'흔들기', hammer:'망치', swap:'바꾸기'})[k] + ' +1');
-  sfx.chime();
+  let k = rewardKey && tools[rewardKey] < 5 ? rewardKey : pickRewardKey(rewardKey);
+  if (k){
+    tools[k]++;
+    renderTools(k);
+    toast(({shake:'흔들기', hammer:'망치', swap:'바꾸기'})[k] + ' +1');
+    sfx.chime();
+  }
+  rewardKey = pickRewardKey(k || rewardKey);
+  renderGauge();
+}
+function renderGauge(){
+  if (!rewardKey) rewardKey = pickRewardKey('swap');
+  const map = {shake:'tShake', hammer:'tHammer', swap:'tSwap'};
+  const pct = state === 'play' && rewardKey ? Math.max(0, Math.min(1, (score - prevReward)/(nextReward - prevReward))) : 0;
+  for (const k in map){
+    const el = $(map[k]), on = k === rewardKey && state === 'play';
+    el.classList.toggle('due', on);
+    el.querySelector('.gauge i').style.width = (on ? pct*100 : 0) + '%';
+  }
 }
 
 function drop(){
@@ -493,14 +521,14 @@ function startGame(){
   for (const b of items()) Composite.remove(world, b);
   queue.length = 0; ghosts.length = 0;
   score = 0; shownScore = 0; maxLvl = 2; combo = 0; dangerT = 0; clock = 0; cooldownUntil = 300; graceUntil = 0; hitStop = 0;
-  tools.shake = 1; tools.hammer = 1; tools.swap = 2; rewards = 0; nextReward = 400;
+  tools.shake = 1; tools.hammer = 1; tools.swap = 2; rewards = 0; nextReward = 400; prevReward = 0; rewardKey = 'shake';
   setHammer(false);
   cur = rollNext(); next = rollNext(); chipPending = false;
   mood = {name:'happy', until:0};
   $('score').textContent = 0;
   $('startOv').hidden = true; $('overOv').hidden = true;
   state = 'play';
-  renderNext(); renderChain(); renderTools();
+  renderNext(); renderChain(); renderTools(); renderGauge();
   try { sfx.unlock(); music.start(); } catch (e) { console.warn('audio', e); }
 }
 
@@ -517,7 +545,7 @@ function gameOver(){
   const sp = document.createElement('span'); sp.textContent = '최고 기록 물건: ' + ITEMS[maxLvl].n;
   $('finalItem').append(im, sp);
   $('overOv').hidden = false;
-  renderTools();
+  renderTools(); renderGauge();
   sfx.over();
 }
 
@@ -588,6 +616,7 @@ function renderChain(popIdx){
   $('dexCount').textContent = dex.size + ' / ' + ITEMS.length;
 }
 function renderTools(gainKey){
+  if (typeof renderGauge === 'function' && !rewardKey) renderGauge();
   const map = {shake:['tShake','cShake'], hammer:['tHammer','cHammer'], swap:['tSwap','cSwap']};
   for (const k in map){
     const [b, c] = map[k];
