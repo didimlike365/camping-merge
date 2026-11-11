@@ -83,7 +83,17 @@ body{
 .iconbtn.off{opacity:.5}
 .iconbtn:active{transform:translateY(2px);box-shadow:0 1px 0 var(--cream-shadow)}
 .iconbtn:focus-visible,.btn:focus-visible,.tool:focus-visible{outline:3px solid var(--ember);outline-offset:2px}
-.stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;touch-action:none}
+.stage{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;touch-action:none}
+/* now playing: sits in the free space above the crate when there is room (e.g. fullscreen) */
+.np{position:absolute;left:0;right:0;top:0;display:flex;align-items:center;justify-content:center;gap:8px;pointer-events:none;
+  font-family:var(--f-display);font-size:16px;color:var(--ink-soft);white-space:nowrap;overflow:hidden}
+.np-title{display:inline-block}
+.np-title.swap{animation:npIn .6s ease}
+@keyframes npIn{0%{opacity:0;transform:translateY(8px)}100%{opacity:1;transform:none}}
+.np-eq{display:inline-flex;align-items:flex-end;gap:2px;height:14px}
+.np-eq i{display:block;width:3px;height:100%;border-radius:2px;background:var(--ember);transform-origin:bottom;animation:eq 1s ease-in-out infinite}
+.np-eq i:nth-child(2){animation-delay:-.35s}.np-eq i:nth-child(3){animation-delay:-.7s}
+@keyframes eq{0%,100%{transform:scaleY(.3)}50%{transform:scaleY(1)}}
 .box{
   position:relative;border-radius:16px;
   border:7px solid var(--wood);
@@ -201,6 +211,7 @@ canvas{display:block;touch-action:none}
 @media (max-width:360px){.chain .chip{width:25px;height:25px}.tool span{display:none}}
 @media (max-height:640px){.trail{display:none}}
 @media (prefers-reduced-motion:reduce){
+  .np-eq i{animation:none}
   .toast,.chain .chip,.ring-item{transition:none}
   .ring-center.pop,.combo.go,.card-in,.tool.gain,.stat .val.bump{animation-duration:.01s}
 }
@@ -242,6 +253,7 @@ canvas{display:block;touch-action:none}
   </div>
 
   <main class="stage" id="stage">
+    <div class="np" id="np" hidden aria-live="polite"><span class="np-eq" aria-hidden="true"><i></i><i></i><i></i></span><span class="np-title" id="npTitle"></span></div>
     <div class="box" id="box">
       <canvas id="cv"></canvas>
       <div class="combo" id="combo"></div>
@@ -619,7 +631,7 @@ function renderMute(){
   muteBtn.classList.toggle('off', muted);
   muteBtn.setAttribute('aria-label', muted ? '소리 켜기' : '소리 끄기');
 }
-muteBtn.addEventListener('click', () => { muted = !muted; store.set('cm-muted', muted?'1':'0'); renderMute(); sfx.unlock(); music.apply(); });
+muteBtn.addEventListener('click', () => { muted = !muted; store.set('cm-muted', muted?'1':'0'); renderMute(); sfx.unlock(); music.apply(); layoutNP(); });
 const musicBtn = $('music');
 function renderMusic(){
   musicBtn.classList.toggle('off', !musicOn);
@@ -628,8 +640,26 @@ function renderMusic(){
 musicBtn.addEventListener('click', () => {
   musicOn = !musicOn; store.set('cm-music', musicOn?'1':'0'); renderMusic();
   if (state !== 'start') music.start(); else music.apply();
+  layoutNP();
 });
 renderMute(); renderMusic();
+
+// ---------- now playing ----------
+let nowTitle = '';
+function onSongStart(name){
+  nowTitle = name;
+  const el = $('npTitle'); el.textContent = '♪ ' + name;
+  el.classList.remove('swap'); void el.offsetWidth; el.classList.add('swap');
+  layoutNP();
+}
+function layoutNP(){
+  const np = $('np'), st = $('stage').getBoundingClientRect(), bx = $('box').getBoundingClientRect();
+  const room = bx.top - st.top;
+  const show = room >= 26 && nowTitle && musicOn && !muted;
+  np.hidden = !show;
+  if (show) np.style.height = room + 'px';
+}
+if (window.ResizeObserver) new ResizeObserver(layoutNP).observe($('stage')); else addEventListener('resize', layoutNP);
 
 // ---------- fullscreen ----------
 // Browsers only allow fullscreen from a tap, so the first tap on the page switches it on.
@@ -764,7 +794,7 @@ const sfx = (() => {
 // 4 숲속 쉼표 (slow piano arpeggios, soft bass, breeze, far-off birds, flute)
 // 5 보사노바 힐링 (nylon guitar bossa groove, flute, shaker, rim clave)
 // 6 호숫가 아침 (harp waltz, cello melody, lapping water)
-// 7 별빛 자장가 (music-box piano, rocking triplets, soft cello, night crickets)
+// 7 노을빛 추억 (emotional piano ballad, cello theme, harp sweeps)
 // Between songs: the old one fades out over its last 3 s, then 2 s of quiet, then the next fades in.
 const music = (() => {
   let a = null, out = null, bus = null, noise = null, bufs = null, loading = null, timer = null, on = false;
@@ -1029,31 +1059,46 @@ const music = (() => {
     }
   };
 
-  // ---- 7. 별빛 자장가: music-box lullaby in C, rocking triplets, 56 bpm ----
-  // C | Am | F | G | C | Em | F G | C
-  const LULLABY_ROOTS = [[48,0],[45,1],[41,0],[43,0],[48,0],[40,1],[41,0],[48,0]];   // [root, minor?]
-  const LULLABY_ROOTS2 = {6:[43,0]};                                                   // second half of bar 6 is G
-  const LULLABY_MEL = M([
-    [[0,76,3],[3,74,3],[6,72,6]], [[0,72,3],[3,76,3],[6,79,6]], [[0,77,3],[3,76,3],[6,74,3],[9,72,3]], [[0,74,9],[9,71,3]],
-    [[0,76,3],[3,79,3],[6,84,6]], [[0,83,3],[3,79,3],[6,76,6]], [[0,77,3],[3,76,3],[6,74,3],[9,71,3]], [[0,72,12]],
+  // ---- 7. 노을빛 추억: emotional piano ballad in D, 70 bpm ----
+  // Bm | G | D | A | Bm | G | Em7 | Asus4-A
+  // loop 1: piano alone · loop 2: cello sings the theme, harp sparkles · loop 3: piano octaves + cello + harp, the peak
+  const SUNSET_ARP = [[47,54,59,61,62,61,59,54],[43,50,55,57,59,57,55,50],[50,57,62,64,66,64,62,57],[45,52,57,59,61,59,57,52],
+                      [47,54,59,61,62,61,59,54],[43,50,55,57,59,57,55,50],[40,47,52,55,59,55,52,47],[45,52,57,59,62,61,57,52]];
+  const SUNSET_THIRD = [62,59,66,61,62,59,55,61];
+  const SUNSET_MEL = M([
+    [[0,74,6],[6,73,2],[8,71,8]],
+    [[0,71,4],[4,74,4],[8,79,6],[14,78,2]],
+    [[0,78,8],[8,76,4],[12,74,4]],
+    [[0,76,12],[12,73,4]],
+    [[0,74,6],[6,76,2],[8,78,8]],
+    [[0,79,4],[4,81,4],[8,83,6],[14,81,2]],
+    [[0,79,8],[8,78,4],[12,76,4]],
+    [[0,76,8],[8,74,4],[12,73,4]],
   ]);
-  const lullaby = {
-    name:'별빛 자장가', bpm:56, div:3, bars:8, loops:2,
+  const sunset = {
+    name:'노을빛 추억', bpm:70, div:4, bars:8, loops:3,
     sched(bar, st, loop, t, spb){
-      const [root, minor] = (st >= 6 && LULLABY_ROOTS2[bar]) || LULLABY_ROOTS[bar];
-      const shape = minor ? [0,7,12,15,12,7] : [0,7,12,16,12,7];
-      play('piano', root + shape[st % 6], t, spb*3, st % 6 === 0 ? 0.13 : 0.08, st % 2 ? 0.25 : -0.25);
-      if (st % 6 === 0) play('cello', root - 12 < 36 ? root : root - 12, t, spb*6, 0.13, 0);
-      const n = LULLABY_MEL[bar].get(st);
+      const arp = SUNSET_ARP[bar];
+      if (st % 2 === 0) play('piano', arp[st/2], t, spb*6, (st === 0 ? 0.15 : 0.1) * (loop === 2 ? 1.15 : 1), st % 4 ? 0.25 : -0.25);
+      if (st === 0) play('cello', arp[0] - 12 < 36 ? arp[0] : arp[0] - 12, t, spb*15, loop === 0 ? 0.1 : 0.16, 0);
+      const n = SUNSET_MEL[bar].get(st);
       if (n){
-        if (loop === 0) play('piano', n[0]+12, t, Math.min(1.8, n[1]*spb), 0.14, 0.2);
-        else { play('xylo', n[0], t, Math.min(1.2, n[1]*spb), 0.13, 0.2); play('piano', n[0], t, Math.min(1.8, n[1]*spb), 0.07, -0.1); }
+        const len = n[1]*spb;
+        if (loop === 0) play('piano', n[0], t, Math.min(2.4, len), 0.17, 0.1);
+        else if (loop === 1) play('cello', n[0]-12, t, len*0.97, 0.34, -0.05);
+        else { play('piano', n[0], t, Math.min(2.4, len), 0.22, 0.12); play('piano', n[0]-12, t, Math.min(2.4, len), 0.12, -0.12); }
       }
-      if (st === 0 && Math.random() < 0.5) cricket(t + Math.random()*1.5, Math.random() < 0.5 ? -0.7 : 0.7);
+      // cello holds the chord's third underneath in the last loop
+      if (loop === 2 && (st === 0 || st === 8)) play('cello', SUNSET_THIRD[bar], t, spb*7.5, 0.16, -0.2);
+      // a quick rising harp sweep at the end of each half
+      if (loop >= 1 && (bar === 3 || bar === 7) && st >= 12){
+        const k = st - 12; play('harp', arp[4 + (k % 4)] + 12, t, spb*3, 0.12, 0.35);
+      }
+      if (loop === 2 && st % 2 === 1) play('harp', arp[(st >> 1) % 8] + 24, t, spb*2, 0.04, 0.4);
     }
   };
 
-  const SONGS = [band, folk, jazz, calm, bossa, lake, lullaby];
+  const SONGS = [band, folk, jazz, calm, bossa, lake, sunset];
   const perBarOf = sg => sg.div * (sg.beats || 4);
   const songLen = sg => sg.loops * sg.bars * perBarOf(sg) * (60/sg.bpm/sg.div);
   function newPlayer(idx, t, fadeIn){
@@ -1061,7 +1106,7 @@ const music = (() => {
     if (fadeIn){ g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(1, t + FADE_IN); }
     else g.gain.setValueAtTime(1, t);
     const sg = SONGS[idx];
-    const p = {idx, song:sg, step:0, loop:0, nextT:t, start:t, end:t + songLen(sg), gain:g, handed:false, done:false};
+    const p = {idx, song:sg, step:0, loop:0, nextT:t, start:t, end:t + songLen(sg), gain:g, handed:false, done:false, told:false};
     // fade the tail out over the last few seconds
     p.gain.gain.setValueAtTime(1, p.end - FADE_OUT);
     p.gain.gain.linearRampToValueAtTime(0, p.end);
@@ -1071,6 +1116,7 @@ const music = (() => {
     const now = a.currentTime;
     for (const p of players.slice()){
       const sg = p.song, perBar = perBarOf(sg), spb = 60/sg.bpm/sg.div;
+      if (!p.told && now >= p.start){ p.told = true; try { onSongStart(sg.name); } catch(e){} }
       while (!p.done && p.nextT < now + 0.15){
         dest = p.gain;
         sg.sched(Math.floor(p.step/perBar), p.step % perBar, p.loop, p.nextT, spb);
